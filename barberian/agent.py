@@ -11,6 +11,7 @@ from .capability_advisor import CapabilityAdvisor
 from .config import Settings
 from .generic_provider import GenericJSONAdapter
 from .http_providers import OpenAICompatibleAdapter
+from .intent import infer_capability
 from .media_adapters import ElevenLabsAdapter, ReplicateAdapter, RunwayAdapter
 from .provider_manager import ProviderManager
 from .providers import ProviderRegistry, ProviderStatus
@@ -89,16 +90,19 @@ class Agent:
                 results.append({"name": spec.name, "status": status.value, "healthy": False, "message": str(exc)})
         return results
 
-    def execute(self, message: str, *, capability: str = "llm", policy: str | None = None) -> dict[str, Any]:
+    def execute(self, message: str, *, capability: str | None = None, policy: str | None = None) -> dict[str, Any]:
         text = message.strip()
         if not text:
             return {"ok": False, "error": "message is required"}
+        capability = capability or infer_capability(text)
+        if capability == "research":
+            return self.research(text)
         self.refresh_providers()
         for spec in self.providers._providers.values():
             if spec.name in self.adapters and not self.providers._health[spec.name].healthy:
                 self.providers.set_health(spec.name, healthy=True, latency_ms=0, status=ProviderStatus.ACTIVE)
         executor = ProviderExecutor(self.router, self.adapters, self.providers)
-        request = {"input": text} if capability == "llm" else {"query": text, "input": text, "prompt": text, "text": text}
+        request = {"input": text, "query": text, "prompt": text, "text": text}
         result = executor.execute(capability, request, policy=policy or self.settings.routing_policy)
         data = result.data
         if isinstance(data, dict):
@@ -107,7 +111,7 @@ class Agent:
                 message_obj = choices[0].get("message", {})
                 if isinstance(message_obj, dict) and message_obj.get("content") is not None:
                     data = message_obj["content"]
-        return {"ok": True, "type": "execution", "data": data, "provider": result.provider, "model": result.model, "latency_ms": result.latency_ms, "attempts": result.attempts, "errors": result.errors}
+        return {"ok": True, "type": "execution", "capability": capability, "data": data, "provider": result.provider, "model": result.model, "latency_ms": result.latency_ms, "attempts": result.attempts, "errors": result.errors}
 
     def research(self, question: str) -> dict[str, Any]:
         self.refresh_providers()
@@ -164,12 +168,7 @@ class Agent:
             return {"ok": True, "type": "capabilities", **self.capability_status()}
         if lowered in {"status", "health", "system status"}:
             return self.status()
-        if lowered.startswith("research "):
-            return self.research(text[9:])
-        try:
-            return self.execute(text)
-        except RuntimeError as exc:
-            return {"ok": False, "type": "execution", "error": str(exc), "providers": self.providers.snapshot()}
+        return self.execute(text)
 
 
 _default_agent = Agent()
