@@ -1,53 +1,78 @@
 # Barberian
 
-API-first universal AI agent runtime. The repository is designed around capability discovery, provider routing, failover, task orchestration, MCP, Skills, research, media, sandbox, GitHub workflows, artifact storage, security and observability.
+Barberian is an API-first universal agent runtime. It is designed to discover approved provider credentials at runtime, route requests by capability and policy, fail over across providers, execute research/media/code workflows, and expose one chat interface.
 
-## Architecture
+## Runtime flow
 
-`User Request → Understand → Context → Plan → Task Graph → Capability Discovery → Routing → Execution → Observation → Verification → Retry/Fallback → Finalize`
+`User Request → Intent → Plan → Capability Discovery → Routing → Execution → Observation → Verification → Retry/Fallback → Finalize`
 
-### Runtime responsibilities
+## Included now
 
-- Provider discovery from environment variable names without exposing secret values.
-- Approved provider catalog and adapter boundary.
+- Environment-based provider discovery with secret values never returned by APIs.
+- Approved provider catalog for LLM, search, image, video and audio capabilities.
+- Explicit custom-provider slots using `BARBERIAN_PROVIDER_<NAME>_*` environment variables; no artificial provider count limit.
+- OpenAI-compatible and Anthropic LLM adapters.
+- Tavily and Serper search adapters.
+- Replicate, Runway and ElevenLabs media adapters.
 - Free-first, fastest, quality-first and balanced routing.
-- Health-aware provider ranking and circuit breakers.
-- Primary → standby → fallback execution with request context preserved.
-- Dependency-aware parallel task execution with cycle detection.
-- Checkpoints and deterministic idempotency keys for resumable work.
-- MCP server/tool registry and versioned Skills registry.
-- Research, media, sandbox and GitHub workflow boundaries.
-- Private memory boundary; only verified shared-safe memory can be exported.
-- PostgreSQL metadata schema; media/secrets are not stored in SQL blobs.
-- Render deployment blueprint with separate web and worker processes.
-- Chat UI with module navigation and health status.
+- Circuit breakers, health states, retry/fallback and invalid-output fallback.
+- Capability-gap advisor with provider recommendations.
+- MCP HTTP JSON-RPC client for tool discovery and calls.
+- Versioned Skills boundary and permission/approval controls.
+- Parallel multi-query research with source deduplication and quality ordering.
+- PostgreSQL metadata schema and idempotent migration runner.
+- Google Drive artifact transport with lazy dependencies.
+- Controlled subprocess sandbox with timeout/output limits.
+- Task queue abstraction and isolated worker runtime.
+- Execution event bus and SSE endpoint for live status.
+- GitHub REST client using runtime-only credentials.
+- Responsive AMOLED-black chat UI with module navigation.
 
-## Run locally
+## Run
 
 ```powershell
+python -m pip install -r requirements.txt
 python app.py
 ```
 
 Open `http://localhost:10000`.
 
-## Environment
+## Provider configuration
 
-Copy `.env.example` to `.env` for local configuration. In production, put secrets in the runtime secret store (for example Render environment secrets). Never commit API keys.
+Copy `.env.example` to `.env` locally, or configure the same variables as runtime secrets in Render. Never commit real API keys.
+
+For an approved provider, set its documented `*_API_KEY`/`*_TOKEN`, endpoint and model variables. For an explicit custom JSON API:
+
+```text
+BARBERIAN_PROVIDER_MYAPI_KEY=...
+BARBERIAN_PROVIDER_MYAPI_ENDPOINT=https://example.com/api
+BARBERIAN_PROVIDER_MYAPI_CAPABILITY=llm
+BARBERIAN_PROVIDER_MYAPI_MODEL=example-model
+BARBERIAN_PROVIDER_MYAPI_PRICING=free
+BARBERIAN_PROVIDER_MYAPI_PRIORITY=50
+```
 
 ## API
 
-- `GET /api/health` — liveness
-- `GET /api/status` — runtime status and provider snapshot
-- `GET /api/providers` — refresh and list discovered provider credentials (never secret values)
-- `POST /api/chat` — primary chat entry point
+- `GET /api/health`
+- `GET /api/status`
+- `GET /api/providers`
+- `GET /api/providers?check=1` — real minimal provider probes
+- `GET /api/models`
+- `GET /api/capabilities`
+- `GET /api/mcp`
+- `GET /api/skills`
+- `GET /api/integrations`
+- `GET /api/tasks?id=<task-id>`
+- `GET /api/events?run_id=<run-id>`
+- `POST /api/chat` with `{"message":"..."}`
+- `POST /api/tasks` with `{"message":"..."}`
 
-## Database
+## Database and artifacts
 
-`database/schema.sql` contains the PostgreSQL metadata model for users, workspaces, projects, conversations, tasks, execution runs/events, providers, MCP, Skills, artifacts, research, video jobs, memory, logs, errors, audit events and permissions.
+Cloud SQL/PostgreSQL stores metadata, task state, provider metadata, execution events, research metadata and artifact references. Media blobs and API secrets are not stored in PostgreSQL.
 
-## Deployment
-
-`render.yaml` defines the web API and isolated worker services. Cloud SQL is the persistent metadata database and Google Drive/object storage is the artifact layer; credentials are runtime-only.
+Google Drive is the artifact layer. `database/schema.sql` is idempotent and `database/migrate.py` applies it using `DATABASE_URL`.
 
 ## Development
 
@@ -55,8 +80,12 @@ Copy `.env.example` to `.env` for local configuration. In production, put secret
 pytest -q
 ```
 
-GitHub Actions runs the test suite on pushes and pull requests.
+GitHub Actions runs the test suite on every push and pull request.
 
-## Status
+## Security boundary
 
-The architecture is implemented incrementally. External provider adapters, cloud database repositories, Drive transport, MCP transports, production sandbox backends and media renderers are explicit extension points; they are not falsely represented as complete merely because their interfaces exist.
+Web reads, file creation and image generation are default permissions. Destructive file deletion, Git pushes, MCP installation and external payments require explicit permission/approval. Provider credentials are runtime-only and are not emitted in status, logs or API responses.
+
+## Version
+
+`0.5.0`
