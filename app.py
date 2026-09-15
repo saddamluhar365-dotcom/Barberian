@@ -48,6 +48,9 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.query.lower() in {"check=1", "check=true", "probe=1"}:
                 return self.send_json({"ok": True, "items": _default_agent.check_providers(), "checked": True})
             return self.send_json({"ok": True, "items": _default_agent.refresh_providers(), "checked": False})
+        if path == "/api/models":
+            items = [{"provider": item["name"], "model": item["model"], "capability": item["capability"]} for item in _default_agent.refresh_providers() if item.get("model")]
+            return self.send_json({"ok": True, "items": items})
         if path == "/api/capabilities":
             return self.send_json({"ok": True, "items": [item.name for item in CAPABILITIES.list()], "status": _default_agent.capability_status()})
         if path == "/api/mcp":
@@ -57,7 +60,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/integrations":
             return self.send_json({"ok": True, "mcp": list_items("mcp"), "skills": list_items("skill")})
         if path == "/api/events":
-            run_id = parsed.query.split("run_id=", 1)[1] if "run_id=" in parsed.query else None
+            run_id = parsed.query.split("run_id=", 1)[1].split("&", 1)[0] if "run_id=" in parsed.query else None
             events = EVENTS.replay(run_id)
             body = "".join(f"data: {json.dumps({'run_id': e.run_id, 'event_type': e.event_type, 'payload': e.payload, 'created_at': e.created_at})}\n\n" for e in events).encode()
             self.send_response(200)
