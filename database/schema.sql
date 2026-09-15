@@ -1,10 +1,10 @@
--- Persistent metadata schema. Secrets and media blobs are intentionally excluded.
+-- Barberian persistent metadata schema. Secrets and media blobs are intentionally excluded.
 CREATE TABLE IF NOT EXISTS users (id UUID PRIMARY KEY, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
 CREATE TABLE IF NOT EXISTS workspaces (id UUID PRIMARY KEY, name TEXT NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
 CREATE TABLE IF NOT EXISTS projects (id UUID PRIMARY KEY, workspace_id UUID REFERENCES workspaces(id), name TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active', created_at TIMESTAMPTZ NOT NULL DEFAULT now());
 CREATE TABLE IF NOT EXISTS conversations (id UUID PRIMARY KEY, project_id UUID REFERENCES projects(id), title TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
 CREATE TABLE IF NOT EXISTS messages (id UUID PRIMARY KEY, conversation_id UUID REFERENCES conversations(id), role TEXT NOT NULL, content JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
-CREATE TABLE IF NOT EXISTS tasks (id UUID PRIMARY KEY, project_id UUID REFERENCES projects(id), kind TEXT NOT NULL, state TEXT NOT NULL, input JSONB NOT NULL DEFAULT '{}', output JSONB, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS tasks (id UUID PRIMARY KEY, project_id UUID REFERENCES projects(id), kind TEXT NOT NULL, state TEXT NOT NULL, input JSONB NOT NULL DEFAULT '{}', output JSONB, idempotency_key TEXT UNIQUE, attempts INT NOT NULL DEFAULT 0, available_at TIMESTAMPTZ NOT NULL DEFAULT now(), locked_at TIMESTAMPTZ, locked_by TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
 CREATE TABLE IF NOT EXISTS task_steps (id UUID PRIMARY KEY, task_id UUID REFERENCES tasks(id), step_key TEXT NOT NULL, state TEXT NOT NULL, attempt INT NOT NULL DEFAULT 0, output JSONB, error TEXT, UNIQUE(task_id, step_key));
 CREATE TABLE IF NOT EXISTS task_dependencies (task_id UUID REFERENCES tasks(id), depends_on UUID REFERENCES tasks(id), PRIMARY KEY(task_id, depends_on));
 CREATE TABLE IF NOT EXISTS execution_runs (id UUID PRIMARY KEY, task_id UUID REFERENCES tasks(id), state TEXT NOT NULL, started_at TIMESTAMPTZ, finished_at TIMESTAMPTZ);
@@ -38,3 +38,11 @@ CREATE TABLE IF NOT EXISTS logs (id BIGSERIAL PRIMARY KEY, run_id UUID, level TE
 CREATE TABLE IF NOT EXISTS errors (id BIGSERIAL PRIMARY KEY, run_id UUID, error_class TEXT NOT NULL, message TEXT NOT NULL, metadata JSONB NOT NULL DEFAULT '{}', created_at TIMESTAMPTZ NOT NULL DEFAULT now());
 CREATE TABLE IF NOT EXISTS audit_events (id BIGSERIAL PRIMARY KEY, workspace_id UUID, actor TEXT, action TEXT NOT NULL, metadata JSONB NOT NULL DEFAULT '{}', created_at TIMESTAMPTZ NOT NULL DEFAULT now());
 CREATE TABLE IF NOT EXISTS permissions (workspace_id UUID REFERENCES workspaces(id), permission TEXT NOT NULL, allowed BOOLEAN NOT NULL DEFAULT FALSE, PRIMARY KEY(workspace_id, permission));
+
+CREATE INDEX IF NOT EXISTS idx_tasks_ready ON tasks(state, available_at);
+CREATE INDEX IF NOT EXISTS idx_task_steps_task ON task_steps(task_id);
+CREATE INDEX IF NOT EXISTS idx_execution_events_run ON execution_events(run_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_provider_health_status ON provider_health(healthy, checked_at);
+CREATE INDEX IF NOT EXISTS idx_artifacts_project ON artifacts(project_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_research_sources_project ON research_sources(research_project_id);
+CREATE INDEX IF NOT EXISTS idx_video_shots_scene ON video_shots(scene_id, shot_index);
