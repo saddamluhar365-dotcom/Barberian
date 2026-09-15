@@ -10,8 +10,9 @@ from .capability_advisor import CapabilityAdvisor
 from .config import Settings
 from .http_providers import OpenAICompatibleAdapter
 from .provider_manager import ProviderManager
-from .providers import ProviderRegistry, ProviderSpec, ProviderStatus
+from .providers import ProviderRegistry, ProviderStatus
 from .routing import SmartRouter
+from .search_adapters import SerperAdapter, TavilyAdapter
 from .services import ProviderExecutor
 
 
@@ -38,16 +39,17 @@ class Agent:
                 continue
             key = spec.env_key
             secret = self.manager.environment.get(key) if key else None
-            if not secret or not spec.endpoint or not spec.model:
+            if not secret or not spec.endpoint:
                 continue
-            catalog_adapter = self.manager.adapter_kind(spec.name)
-            if catalog_adapter == "http":
-                self.adapters[spec.name] = OpenAICompatibleAdapter(
-                    secret, spec.endpoint, spec.model, name=spec.name, timeout=self.settings.request_timeout_seconds
-                )
+            adapter_kind = self.manager.adapter_kind(spec.name)
+            if adapter_kind == "http" and spec.model:
+                self.adapters[spec.name] = OpenAICompatibleAdapter(secret, spec.endpoint, spec.model, name=spec.name, timeout=self.settings.request_timeout_seconds)
+            elif adapter_kind == "tavily":
+                self.adapters[spec.name] = TavilyAdapter(secret, spec.endpoint)
+            elif adapter_kind == "serper":
+                self.adapters[spec.name] = SerperAdapter(secret, spec.endpoint)
 
     def check_providers(self) -> list[dict[str, Any]]:
-        """Run a real minimal provider request for configured executable providers."""
         self.refresh_providers()
         results: list[dict[str, Any]] = []
         for spec in self.providers._providers.values():
@@ -56,19 +58,14 @@ class Agent:
                 results.append({"name": spec.name, "status": ProviderStatus.UNKNOWN.value, "healthy": False, "message": "adapter unavailable"})
                 continue
             try:
-                response, latency = adapter.timed(adapter.execute, {"input": "Reply with OK.", "max_tokens": 1})
+                probe = {"input": "Reply with OK.", "max_tokens": 1} if spec.capability == "llm" else {"query": "OpenAI"}
+                response, latency = adapter.timed(adapter.execute, probe)
                 valid = response is not None
                 self.providers.set_health(spec.name, healthy=valid, latency_ms=latency, status=ProviderStatus.ACTIVE if valid else ProviderStatus.DEGRADED)
                 results.append({"name": spec.name, "status": ProviderStatus.ACTIVE.value if valid else ProviderStatus.DEGRADED.value, "healthy": valid, "latency_ms": latency})
             except Exception as exc:
                 kind = adapter.classify_error(exc)
-                status = {
-                    "rate_limit": ProviderStatus.RATE_LIMITED,
-                    "quota": ProviderStatus.QUOTA_LOW,
-                    "auth": ProviderStatus.AUTH_ERROR,
-                    "timeout": ProviderStatus.DOWN,
-                    "server_error": ProviderStatus.DEGRADED,
-                }.get(kind.value, ProviderStatus.DOWN)
+                status = {"rate_limit": ProviderStatus.RATE_LIMITED, "quota": ProviderStatus.QUOTA_LOW, "auth": ProviderStatus.AUTH_ERROR, "timeout": ProviderStatus.DOWN, "server_error": ProviderStatus.DEGRADED}.get(kind.value, ProviderStatus.DOWN)
                 self.providers.set_health(spec.name, healthy=False, latency_ms=0, status=status, message=str(exc))
                 results.append({"name": spec.name, "status": status.value, "healthy": False, "message": str(exc)})
         return results
@@ -78,12 +75,12 @@ class Agent:
         if not text:
             return {"ok": False, "error": "message is required"}
         self.refresh_providers()
-        # A configured approved adapter is eligible before its first explicit probe; failures then update the breaker.
         for spec in self.providers._providers.values():
             if spec.name in self.adapters and not self.providers._health[spec.name].healthy:
                 self.providers.set_health(spec.name, healthy=True, latency_ms=0, status=ProviderStatus.ACTIVE)
         executor = ProviderExecutor(self.router, self.adapters, self.providers)
-        result = executor.execute(capability, {"input": text}, policy=policy or self.settings.routing_policy)
+        request = {"input": text} if capability == "llm" else {"query": text, "input": text}
+        result = executor.execute(capability, request, policy=policy or self.settings.routing_policy)
         data = result.data
         if isinstance(data, dict):
             choices = data.get("choices")
