@@ -4,7 +4,7 @@ import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from time import time
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
 from barberian.agent import _default_agent, handle_message
@@ -12,6 +12,8 @@ from barberian.capabilities import CapabilityRegistry
 from barberian.config import Settings
 from barberian.events import EventBus, ExecutionEvent
 from barberian.mcp import MCPRegistry
+from barberian.planner import Planner
+from barberian.queue import InMemoryTaskQueue, QueueTask
 from barberian.registry import list_items
 from barberian.skills import SkillRegistry
 
@@ -20,10 +22,12 @@ CAPABILITIES = CapabilityRegistry()
 MCP = MCPRegistry()
 SKILLS = SkillRegistry()
 EVENTS = EventBus()
+TASKS = InMemoryTaskQueue()
+PLANNER = Planner()
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "Barberian/0.4"
+    server_version = "Barberian/0.5"
 
     def log_message(self, format, *args):
         return
@@ -45,7 +49,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/status":
             return self.send_json(_default_agent.status())
         if path == "/api/providers":
-            if parsed.query.lower() in {"check=1", "check=true", "probe=1"}:
+            if parse_qs(parsed.query).get("check", ["0"])[0] in {"1", "true"}:
                 return self.send_json({"ok": True, "items": _default_agent.check_providers(), "checked": True})
             return self.send_json({"ok": True, "items": _default_agent.refresh_providers(), "checked": False})
         if path == "/api/models":
@@ -59,8 +63,14 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json({"ok": True, "items": [skill.name for skill in SKILLS.list()]})
         if path == "/api/integrations":
             return self.send_json({"ok": True, "mcp": list_items("mcp"), "skills": list_items("skill")})
+        if path == "/api/tasks":
+            task_id = parse_qs(parsed.query).get("id", [None])[0]
+            if task_id:
+                task = TASKS.get(task_id)
+                return self.send_json({"ok": bool(task), "task": task.__dict__ if task and hasattr(task, "__dict__") else ({"id": task.id, "status": task.status, "attempts": task.attempts, "result": task.result, "error": task.error} if task else None)}, 200 if task else 404)
+            return self.send_json({"ok": True, "items": []})
         if path == "/api/events":
-            run_id = parsed.query.split("run_id=", 1)[1].split("&", 1)[0] if "run_id=" in parsed.query else None
+            run_id = parse_qs(parsed.query).get("run_id", [None])[0]
             events = EVENTS.replay(run_id)
             body = "".join(f"data: {json.dumps({'run_id': e.run_id, 'event_type': e.event_type, 'payload': e.payload, 'created_at': e.created_at})}\n\n" for e in events).encode()
             self.send_response(200)
@@ -82,29 +92,35 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
-        if path != "/api/chat":
-            return self.send_json({"ok": False, "error": "not found"}, 404)
-        run_id = str(uuid4())
         try:
             size = int(self.headers.get("Content-Length", 0))
             if size < 0 or size > 1_048_576:
                 return self.send_json({"ok": False, "error": "request too large"}, 413)
             data = json.loads(self.rfile.read(size) or b"{}")
+            if path == "/api/tasks":
+                message = data.get("message", "")
+                if not isinstance(message, str) or not message.strip():
+                    return self.send_json({"ok": False, "error": "message is required"}, 400)
+                task = QueueTask(str(uuid4()), {"message": message})
+                TASKS.enqueue(task)
+                EVENTS.publish(ExecutionEvent(task.id, "queued", {"message": message}))
+                return self.send_json({"ok": True, "task_id": task.id, "status": task.status}, 202)
+            if path != "/api/chat":
+                return self.send_json({"ok": False, "error": "not found"}, 404)
             message = data.get("message", "")
             if not isinstance(message, str) or not message.strip():
                 return self.send_json({"ok": False, "error": "message is required"}, 400)
+            run_id = str(uuid4())
             EVENTS.publish(ExecutionEvent(run_id, "started", {"stage": "understand"}))
             started = time()
             result = handle_message(message)
             EVENTS.publish(ExecutionEvent(run_id, "completed", {"ok": bool(result.get("ok")), "latency_ms": round((time() - started) * 1000)}))
             result["run_id"] = run_id
-            self.send_json(result, 200 if result.get("ok") else 400)
+            return self.send_json(result, 200 if result.get("ok") else 400)
         except (ValueError, json.JSONDecodeError):
-            EVENTS.publish(ExecutionEvent(run_id, "failed", {"error": "invalid request"}))
-            self.send_json({"ok": False, "error": "invalid request", "run_id": run_id}, 400)
+            return self.send_json({"ok": False, "error": "invalid request"}, 400)
         except Exception:
-            EVENTS.publish(ExecutionEvent(run_id, "failed", {"error": "internal error"}))
-            self.send_json({"ok": False, "error": "internal error", "run_id": run_id}, 500)
+            return self.send_json({"ok": False, "error": "internal error"}, 500)
 
 
 def run(host: str | None = None, port: int | None = None):
