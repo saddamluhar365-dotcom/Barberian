@@ -1,9 +1,4 @@
-"""Defensive pre-deployment security gate for the Barberian project.
-
-This scanner is intentionally conservative: it reports evidence-based risks,
-never prints discovered secret values, and blocks deployment on unresolved
-Critical/High findings.
-"""
+"""Defensive pre-deployment security gate for the Barberian project."""
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
@@ -54,7 +49,8 @@ class SecurityReport:
 TEXT_EXTENSIONS = {".py", ".js", ".ts", ".tsx", ".jsx", ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf", ".md", ".txt", ".sh", ".ps1", ".env"}
 SKIP_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", ".pytest_cache", "dist", "build"}
 SECRET_PATTERNS = (
-    re.compile(r"(?i)(api[_-]?key|secret|password|token)\s*[:=]\s*[\"']([^\"'\s]{12,})[\"']"),
+    re.compile(r"(?i)\b(?:api[_-]?key|secret|password|token|access[_-]?token|client[_-]?secret)\b\s*[:=]\s*[\"']([^\"'\s]{12,})[\"']"),
+    re.compile(r"(?i)\b(?:api[_-]?key|secret|password|token|access[_-]?token|client[_-]?secret)\b\s*[:=]\s*([^\s#]{12,})\s*$"),
     re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b"),
     re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----"),
 )
@@ -84,13 +80,14 @@ class SecurityGate:
             if path.name == ".env":
                 findings.append(Finding(Severity.CRITICAL, "secrets", "Environment file is present in project tree", rel, remediation="Keep .env out of source control and use platform secret storage."))
             for number, line in enumerate(lines, 1):
-                if any(pattern.search(line) for pattern in SECRET_PATTERNS):
-                    findings.append(Finding(Severity.CRITICAL, "secrets", "Possible hard-coded credential or private key", rel, number, "secret-like value detected and redacted", "Rotate exposed credentials and move them to a secret manager/environment."))
+                stripped = line.strip()
+                if stripped and not stripped.startswith(("#", "//")) and any(pattern.search(line) for pattern in SECRET_PATTERNS):
+                    findings.append(Finding(Severity.CRITICAL, "secrets", "Possible hard-coded secret", rel, number, "secret-like value detected and redacted", "Rotate exposed credentials and move them to secret/environment storage."))
                 if DANGEROUS_SHELL.search(line):
                     findings.append(Finding(Severity.HIGH, "command-execution", "Shell execution requires security review", rel, number, "dangerous shell execution pattern detected", "Use structured argument arrays, strict allowlists and a hardened sandbox; never pass untrusted text to a shell."))
                 if DEBUG_EXPOSURE.search(line):
                     findings.append(Finding(Severity.MEDIUM, "information-disclosure", "Debug/traceback exposure pattern", rel, number, "debug exposure pattern detected", "Disable debug mode and return generic production errors with request IDs."))
-                if WEAK_HTTP.search(line) and not line.lstrip().startswith(("#", "//")):
+                if WEAK_HTTP.search(line) and not stripped.startswith(("#", "//")):
                     findings.append(Finding(Severity.MEDIUM, "transport", "Potential insecure HTTP/TLS verification configuration", rel, number, "plaintext HTTP or disabled verification pattern", "Use HTTPS and certificate verification for production traffic."))
             if path.name.lower() in {"dockerfile", "docker-compose.yml", "docker-compose.yaml"} and re.search(r"(?i)privileged\s*:\s*true|/var/run/docker.sock", text):
                 findings.append(Finding(Severity.CRITICAL, "container", "Privileged container or Docker socket exposure", rel, remediation="Remove privileged mode and unnecessary Docker socket/host access."))
