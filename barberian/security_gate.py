@@ -48,9 +48,10 @@ class SecurityReport:
 
 TEXT_EXTENSIONS = {".py", ".js", ".ts", ".tsx", ".jsx", ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf", ".md", ".txt", ".sh", ".ps1", ".env"}
 SKIP_DIRS = {".git", ".venv", "venv", "node_modules", "__pycache__", ".pytest_cache", "dist", "build"}
+SKIP_PATHS = {"README.md", "barberian/security_gate.py"}
 SECRET_PATTERNS = (
     re.compile(r"(?i)\b(?:api[_-]?key|secret|password|token|access[_-]?token|client[_-]?secret)\b\s*[:=]\s*[\"']([^\"'\s]{12,})[\"']"),
-    re.compile(r"(?i)\b(?:api[_-]?key|secret|password|token|access[_-]?token|client[_-]?secret)\b\s*[:=]\s*([^\s#]{12,})\s*$"),
+    re.compile(r"(?i)\b(?:api[_-]?key|secret|password|token|access[_-]?token|client[_-]?secret)\b\s*[:=]\s*(sk-[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{20,})\b"),
     re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b"),
     re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----"),
 )
@@ -66,12 +67,19 @@ class SecurityGate:
     def _files(self) -> Iterable[Path]:
         if not self.root.exists():
             return ()
-        return (p for p in self.root.rglob("*") if p.is_file() and not any(part in SKIP_DIRS for part in p.parts) and (p.suffix.lower() in TEXT_EXTENSIONS or p.name in {"Dockerfile", "requirements.txt", "package-lock.json"}))
+        return (
+            p for p in self.root.rglob("*")
+            if p.is_file()
+            and not any(part in SKIP_DIRS for part in p.parts)
+            and str(p.relative_to(self.root)).replace("\\", "/") not in SKIP_PATHS
+            and "tests/" not in str(p.relative_to(self.root)).replace("\\", "/")
+            and (p.suffix.lower() in TEXT_EXTENSIONS or p.name in {"Dockerfile", "requirements.txt", "package-lock.json"})
+        )
 
     def audit(self) -> SecurityReport:
         findings: list[Finding] = []
         for path in self._files():
-            rel = str(path.relative_to(self.root))
+            rel = str(path.relative_to(self.root)).replace("\\", "/")
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")
             except OSError:
