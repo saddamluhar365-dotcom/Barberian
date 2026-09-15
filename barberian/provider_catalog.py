@@ -21,6 +21,7 @@ CATALOG = {
     "groq": ProviderCatalogEntry("groq", "llm", "GROQ_API_KEY", "GROQ_BASE_URL", "GROQ_MODEL", "https://api.groq.com/openai/v1/chat/completions", "llama-3.1-8b-instant"),
     "mistral": ProviderCatalogEntry("mistral", "llm", "MISTRAL_API_KEY", "MISTRAL_BASE_URL", "MISTRAL_MODEL", "https://api.mistral.ai/v1/chat/completions", "mistral-small-latest"),
     "anthropic": ProviderCatalogEntry("anthropic", "llm", "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "ANTHROPIC_MODEL", "https://api.anthropic.com/v1/messages", "claude-3-5-haiku-latest", adapter="anthropic"),
+    "gemini": ProviderCatalogEntry("gemini", "llm", "GEMINI_API_KEY", "GEMINI_BASE_URL", "GEMINI_MODEL", "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", "gemini-2.5-flash"),
     "perplexity": ProviderCatalogEntry("perplexity", "search", "PERPLEXITY_API_KEY", "PERPLEXITY_BASE_URL", "PERPLEXITY_MODEL", "https://api.perplexity.ai/chat/completions", "sonar"),
     "tavily": ProviderCatalogEntry("tavily", "search", "TAVILY_API_KEY", "TAVILY_BASE_URL", None, "https://api.tavily.com/search", None, adapter="tavily"),
     "serper": ProviderCatalogEntry("serper", "search", "SERPER_API_KEY", "SERPER_BASE_URL", None, "https://google.serper.dev/search", None, adapter="serper"),
