@@ -5,6 +5,7 @@ from typing import Any
 
 from . import registry
 from .adapters import ProviderAdapter
+from .anthropic_adapter import AnthropicAdapter
 from .capabilities import CapabilityRegistry
 from .capability_advisor import CapabilityAdvisor
 from .config import Settings
@@ -46,6 +47,8 @@ class Agent:
             kind = self.manager.adapter_kind(spec.name)
             if kind == "http" and spec.model:
                 self.adapters[spec.name] = OpenAICompatibleAdapter(secret, spec.endpoint, spec.model, name=spec.name, timeout=self.settings.request_timeout_seconds)
+            elif kind == "anthropic" and spec.model:
+                self.adapters[spec.name] = AnthropicAdapter(secret, spec.model, spec.endpoint, self.settings.request_timeout_seconds)
             elif kind == "tavily":
                 self.adapters[spec.name] = TavilyAdapter(secret, spec.endpoint)
             elif kind == "serper":
@@ -68,7 +71,14 @@ class Agent:
                 results.append({"name": spec.name, "status": ProviderStatus.UNKNOWN.value, "healthy": False, "message": "adapter unavailable"})
                 continue
             try:
-                probe = {"input": "Reply with OK.", "max_tokens": 1} if spec.capability == "llm" else {"query": "OpenAI"} if spec.capability == "search" else {"prompt": "test", "text": "test"}
+                if spec.capability == "llm":
+                    probe = {"input": "Reply with OK.", "max_tokens": 1}
+                elif spec.capability == "search":
+                    probe = {"query": "OpenAI"}
+                elif spec.capability == "audio":
+                    probe = {"text": "OK"}
+                else:
+                    probe = {"prompt": "test"}
                 response, latency = adapter.timed(adapter.execute, probe)
                 valid = response is not None
                 self.providers.set_health(spec.name, healthy=valid, latency_ms=latency, status=ProviderStatus.ACTIVE if valid else ProviderStatus.DEGRADED)
@@ -89,7 +99,7 @@ class Agent:
             if spec.name in self.adapters and not self.providers._health[spec.name].healthy:
                 self.providers.set_health(spec.name, healthy=True, latency_ms=0, status=ProviderStatus.ACTIVE)
         executor = ProviderExecutor(self.router, self.adapters, self.providers)
-        request = {"input": text} if capability == "llm" else {"query": text, "input": text}
+        request = {"input": text} if capability == "llm" else {"query": text, "input": text, "prompt": text, "text": text}
         result = executor.execute(capability, request, policy=policy or self.settings.routing_policy)
         data = result.data
         if isinstance(data, dict):
