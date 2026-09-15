@@ -19,9 +19,7 @@ class QueueTask:
 
 class InMemoryTaskQueue:
     def __init__(self) -> None:
-        self._tasks: dict[str, QueueTask] = {}
-        self._pending: list[str] = []
-        self._lock = Lock()
+        self._tasks: dict[str, QueueTask] = {}; self._pending: list[str] = []; self._lock = Lock()
 
     def enqueue(self, task: QueueTask) -> QueueTask:
         with self._lock:
@@ -51,8 +49,7 @@ class InMemoryTaskQueue:
 class PostgresTaskQueue:
     """Uses PostgreSQL row locks so multiple worker processes can share the queue safely."""
 
-    def __init__(self, database) -> None:
-        self.database = database
+    def __init__(self, database) -> None: self.database = database
 
     def claim(self, worker_id: str) -> QueueTask | None:
         with self.database.connection() as connection:
@@ -62,11 +59,21 @@ class PostgresTaskQueue:
                 return QueueTask(str(row[0]), row[1] or {}, "RUNNING", int(row[2] or 0)) if row else None
 
     def complete(self, task_id: str, result: Any) -> None:
+        try:
+            from psycopg.types.json import Jsonb
+            value = Jsonb(result)
+        except ImportError:
+            value = result
         with self.database.connection() as connection:
             with connection.cursor() as cursor:
-                cursor.execute("UPDATE tasks SET state='SUCCEEDED', output=%s, locked_at=NULL, locked_by=NULL WHERE id=%s", (result, task_id))
+                cursor.execute("UPDATE tasks SET state='SUCCEEDED', output=%s, locked_at=NULL, locked_by=NULL WHERE id=%s", (value, task_id))
 
     def fail(self, task_id: str, error: str) -> None:
+        try:
+            from psycopg.types.json import Jsonb
+            value = Jsonb({"error": error})
+        except ImportError:
+            value = {"error": error}
         with self.database.connection() as connection:
             with connection.cursor() as cursor:
-                cursor.execute("UPDATE tasks SET state='FAILED', output=%s, locked_at=NULL, locked_by=NULL WHERE id=%s", ({"error": error}, task_id))
+                cursor.execute("UPDATE tasks SET state='FAILED', output=%s, locked_at=NULL, locked_by=NULL WHERE id=%s", (value, task_id))
