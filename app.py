@@ -3,14 +3,14 @@
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 
 from barberian.agent import _default_agent, handle_message
 from barberian.capabilities import CapabilityRegistry
 from barberian.config import Settings
 from barberian.mcp import MCPRegistry
-from barberian.skills import SkillRegistry
 from barberian.registry import list_items
+from barberian.skills import SkillRegistry
 
 WEB = Path(__file__).parent / "web" / "index.html"
 CAPABILITIES = CapabilityRegistry()
@@ -41,10 +41,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/status":
             return self.send_json(_default_agent.status())
         if path == "/api/providers":
-            query = parse_qs(parsed.query)
-            return self.send_json({"ok": True, "items": _default_agent.refresh_providers(), "check_requested": query.get("check", ["0"])[0] == "1"})
+            if parsed.query.lower() in {"check=1", "check=true", "probe=1"}:
+                return self.send_json({"ok": True, "items": _default_agent.check_providers(), "checked": True})
+            return self.send_json({"ok": True, "items": _default_agent.refresh_providers(), "checked": False})
         if path == "/api/capabilities":
-            return self.send_json({"ok": True, "items": [item.name for item in CAPABILITIES.list()]})
+            return self.send_json({"ok": True, "items": [item.name for item in CAPABILITIES.list()], "status": _default_agent.capability_status()})
         if path == "/api/mcp":
             return self.send_json({"ok": True, "items": MCP.list_servers()})
         if path == "/api/skills":
