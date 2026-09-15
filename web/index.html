@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Barberian</title>
+<style>
+:root{color-scheme:dark}body{margin:0;background:#000;color:#fff;font:15px system-ui;display:flex;height:100vh}main{max-width:850px;width:100%;margin:auto;padding:24px}#chat{min-height:70vh;overflow:auto;border:1px solid #222;padding:16px;border-radius:14px}.msg{margin:12px 0;white-space:pre-wrap}.user{opacity:.7}form{display:flex;gap:8px;margin-top:12px}input{flex:1;background:#111;color:#fff;border:1px solid #333;border-radius:10px;padding:13px}button{background:#fff;color:#000;border:0;border-radius:10px;padding:0 18px}
+</style></head>
+<body><main><h2>Barberian</h2><div id="chat"></div><form><input id="input" placeholder="Tell Barberian what to do..." autocomplete="off"><button>Send</button></form></main>
+<script>
+const chat=document.querySelector('#chat'), input=document.querySelector('#input');
+function add(who,text){const d=document.createElement('div');d.className='msg '+who;d.textContent=who==='user'?'You: '+text:'Barberian: '+text;chat.append(d);chat.scrollTop=chat.scrollHeight}
+document.querySelector('form').onsubmit=async e=>{e.preventDefault();const message=input.value.trim();if(!message)return;input.value='';add('user',message);const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message})});add('bot',JSON.stringify(await r.json(),null,2))};
+</script></body></html>
