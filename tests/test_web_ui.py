@@ -16,7 +16,7 @@ def test_chat_ui_has_mobile_first_shell_and_composer():
 def test_chat_ui_persists_conversations_and_renders_markdown_safely():
     assert "localStorage" in HTML
     assert "renderMarkdown" in HTML
-    assert "copyMessage" in HTML or 'class="copy"' in HTML
+    assert "copyMessage" in HTML or 'class="copy"' in HTML or "className='copy'" in HTML
     assert "escapeHtml" in HTML or "function esc" in HTML
 
 
