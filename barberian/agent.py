@@ -3,7 +3,7 @@
 import re
 from typing import Any
 
-from . import registry
+from . import __version__, registry
 from .adapters import ProviderAdapter
 from .anthropic_adapter import AnthropicAdapter
 from .capabilities import CapabilityRegistry
@@ -22,8 +22,6 @@ from .services import ProviderExecutor
 
 
 class Agent:
-    """Coordinates capability discovery, routing, execution, verification and commands."""
-
     def __init__(self, settings: Settings | None = None) -> None:
         self.settings = settings or Settings.from_env()
         self.providers = ProviderRegistry()
@@ -42,8 +40,7 @@ class Agent:
         for spec in list(self.providers._providers.values()):
             if spec.name in self.adapters:
                 continue
-            key = spec.env_key
-            secret = self.manager.environment.get(key) if key else None
+            secret = self.manager.environment.get(spec.env_key) if spec.env_key else None
             if not secret or not spec.endpoint:
                 continue
             kind = self.manager.adapter_kind(spec.name)
@@ -68,17 +65,14 @@ class Agent:
 
     def check_providers(self) -> list[dict[str, Any]]:
         self.refresh_providers()
-        results: list[dict[str, Any]] = []
+        results = []
         for spec in self.providers._providers.values():
             adapter = self.adapters.get(spec.name)
             if adapter is None:
                 results.append({"name": spec.name, "status": ProviderStatus.UNKNOWN.value, "healthy": False, "message": "adapter unavailable"})
                 continue
             try:
-                if spec.capability == "llm": probe = {"input": "Reply with OK.", "max_tokens": 1}
-                elif spec.capability == "search": probe = {"query": "OpenAI"}
-                elif spec.capability == "audio": probe = {"text": "OK"}
-                else: probe = {"prompt": "test"}
+                probe = {"input": "Reply with OK.", "max_tokens": 1} if spec.capability == "llm" else {"query": "OpenAI"} if spec.capability == "search" else {"text": "OK"} if spec.capability == "audio" else {"prompt": "test"}
                 response, latency = adapter.timed(adapter.execute, probe)
                 valid = response is not None
                 self.providers.set_health(spec.name, healthy=valid, latency_ms=latency, status=ProviderStatus.ACTIVE if valid else ProviderStatus.DEGRADED)
@@ -102,15 +96,12 @@ class Agent:
             if spec.name in self.adapters and not self.providers._health[spec.name].healthy:
                 self.providers.set_health(spec.name, healthy=True, latency_ms=0, status=ProviderStatus.ACTIVE)
         executor = ProviderExecutor(self.router, self.adapters, self.providers)
-        request = {"input": text, "query": text, "prompt": text, "text": text}
-        result = executor.execute(capability, request, policy=policy or self.settings.routing_policy)
+        result = executor.execute(capability, {"input": text, "query": text, "prompt": text, "text": text}, policy=policy or self.settings.routing_policy)
         data = result.data
-        if isinstance(data, dict):
-            choices = data.get("choices")
-            if choices and isinstance(choices, list):
-                message_obj = choices[0].get("message", {})
-                if isinstance(message_obj, dict) and message_obj.get("content") is not None:
-                    data = message_obj["content"]
+        if isinstance(data, dict) and isinstance(data.get("choices"), list) and data["choices"]:
+            message_obj = data["choices"][0].get("message", {})
+            if isinstance(message_obj, dict) and message_obj.get("content") is not None:
+                data = message_obj["content"]
         return {"ok": True, "type": "execution", "capability": capability, "data": data, "provider": result.provider, "model": result.model, "latency_ms": result.latency_ms, "attempts": result.attempts, "errors": result.errors}
 
     def research(self, question: str) -> dict[str, Any]:
@@ -120,13 +111,12 @@ class Agent:
         if not adapters:
             return {"ok": False, "type": "research", "error": "no search provider configured", "capability_gap": "search"}
         def search(query: str):
-            sources: list[ResearchSource] = []
+            sources = []
             for adapter in adapters:
                 try:
                     response = adapter.execute({"query": query})
                     data = response.data if hasattr(response, "data") else response
-                    items = data.get("results", []) if isinstance(data, dict) else []
-                    for item in items:
+                    for item in data.get("results", []) if isinstance(data, dict) else []:
                         if isinstance(item, dict) and item.get("url"):
                             sources.append(ResearchSource(str(item["url"]), str(item.get("title", "")), str(item.get("content", item.get("snippet", ""))), float(item.get("score", 0.0) or 0.0)))
                 except Exception:
@@ -141,7 +131,7 @@ class Agent:
         return {"missing": list(assessment.missing), "unknown": list(assessment.unknown), "suggestions": {k: list(v) for k, v in assessment.suggestions.items()}}
 
     def status(self) -> dict[str, Any]:
-        return {"ok": True, "service": "barberian", "version": "0.3.0", "routing_policy": self.settings.routing_policy, "providers": self.providers.snapshot(), "adapters": sorted(self.adapters), "capability_gaps": self.capability_status()}
+        return {"ok": True, "service": "barberian", "version": __version__, "routing_policy": self.settings.routing_policy, "providers": self.providers.snapshot(), "adapters": sorted(self.adapters), "capability_gaps": self.capability_status()}
 
     def handle(self, message: str) -> dict[str, Any]:
         text = message.strip()
@@ -150,16 +140,13 @@ class Agent:
         lowered = text.lower()
         match = re.fullmatch(r"add\s+(.+?)\s+(mcp|skill)", lowered)
         if match:
-            name, kind = match.groups()
-            return registry.add(kind, name)
+            name, kind = match.groups(); return registry.add(kind, name)
         match = re.fullmatch(r"(?:list|show)\s+(mcp|skills?)", lowered)
         if match:
-            kind = "skill" if match.group(1).startswith("skill") else "mcp"
-            return registry.list_items(kind)
+            kind = "skill" if match.group(1).startswith("skill") else "mcp"; return registry.list_items(kind)
         match = re.fullmatch(r"disable\s+(.+?)\s+(mcp|skill)", lowered)
         if match:
-            name, kind = match.groups()
-            return registry.disable(kind, name)
+            name, kind = match.groups(); return registry.disable(kind, name)
         if lowered in {"api", "apis", "list apis", "show apis", "api status"}:
             return {"ok": True, "type": "providers", "items": self.refresh_providers()}
         if lowered in {"check api", "check apis", "check providers", "health check"}:
