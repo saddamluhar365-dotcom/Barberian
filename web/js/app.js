@@ -1,5 +1,5 @@
 import { health } from "./api.js";
-import { ensureActiveChat, createChat, getActiveChat } from "./state.js";
+import { ensureActiveChat, createChat, getActiveChat, clearChats } from "./state.js";
 import { renderConversation } from "./chat.js";
 import { renderHistory } from "./history.js";
 import { initUI } from "./ui.js";
@@ -21,10 +21,14 @@ function render() {
   renderConversation(elements.messages, chat);
 }
 
+function refreshHistory() {
+  renderHistory(elements.history, elements.searchInput.value, (chat) => { render(); elements.title.textContent = chat.title; });
+}
+
 function handleHistory(action) {
   if (action === "new") createChat();
-  else if (action === "clear") { createChat(); }
-  render(); renderHistory(elements.history, elements.searchInput.value, (chat) => { render(); elements.title.textContent = chat.title; });
+  else if (action === "clear") { clearChats(); createChat(); }
+  render(); refreshHistory();
 }
 
 async function checkHealth() {
