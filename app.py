@@ -18,13 +18,18 @@ from barberian.queue import InMemoryTaskQueue, PostgresTaskQueue, QueueTask
 from barberian.registry import list_items
 from barberian.skills import SkillRegistry
 
-WEB = Path(__file__).parent / "web" / "index.html"
+WEB_ROOT = Path(__file__).parent / "web"
 CAPABILITIES = CapabilityRegistry()
 MCP = MCPRegistry()
 SKILLS = SkillRegistry()
 EVENTS = EventBus()
 LOCAL_TASKS = InMemoryTaskQueue()
 MAX_REQUEST_BYTES = 1_048_576
+STATIC_TYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".js": "application/javascript; charset=utf-8",
+}
 
 
 def task_queue():
@@ -37,9 +42,28 @@ def _security_headers(handler: BaseHTTPRequestHandler) -> None:
     handler.send_header("X-Frame-Options", "DENY")
     handler.send_header("Referrer-Policy", "no-referrer")
     handler.send_header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-    handler.send_header("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'")
+    handler.send_header(
+        "Content-Security-Policy",
+        "default-src 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'",
+    )
     if os.getenv("TRUST_PROXY_TLS", "0").lower() in {"1", "true", "yes"}:
         handler.send_header("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+
+
+def _static_file(url_path: str) -> tuple[Path, str] | None:
+    if not url_path.startswith("/"):
+        return None
+    relative = url_path.lstrip("/")
+    if not relative or "\\" in relative:
+        return None
+    candidate = (WEB_ROOT / relative).resolve()
+    try:
+        candidate.relative_to(WEB_ROOT.resolve())
+    except ValueError:
+        return None
+    if not candidate.is_file() or candidate.suffix.lower() not in STATIC_TYPES:
+        return None
+    return candidate, STATIC_TYPES[candidate.suffix.lower()]
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -53,6 +77,18 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(body)))
+        _security_headers(self)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def send_static(self, file_path: Path, content_type: str):
+        body = file_path.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Cache-Control", "no-store, max-age=0, must-revalidate" if file_path.name == "index.html" else "public, max-age=3600")
+        if file_path.name == "index.html":
+            self.send_header("Pragma", "no-cache")
         self.send_header("Content-Length", str(len(body)))
         _security_headers(self)
         self.end_headers()
@@ -90,7 +126,7 @@ class Handler(BaseHTTPRequestHandler):
             run_id = parse_qs(parsed.query).get("run_id", [None])[0]
             body = "".join(f"data: {json.dumps({'run_id': e.run_id, 'event_type': e.event_type, 'payload': e.payload, 'created_at': e.created_at})}\n\n" for e in EVENTS.replay(run_id)).encode()
             self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
             self.send_header("Cache-Control", "no-cache")
             self.send_header("Content-Length", str(len(body)))
             _security_headers(self)
@@ -98,17 +134,14 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
         if path in ("/", "/index.html"):
-            body = WEB.read_bytes()
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Cache-Control", "no-store, max-age=0, must-revalidate")
-            self.send_header("Pragma", "no-cache")
-            self.send_header("Content-Length", str(len(body)))
-            _security_headers(self)
-            self.end_headers()
-            self.wfile.write(body)
-            return
-        self.send_json({"ok": False, "error": "not found"}, 404)
+            static = _static_file("/index.html")
+            if static:
+                return self.send_static(*static)
+        elif path.startswith("/css/") or path.startswith("/js/"):
+            static = _static_file(path)
+            if static:
+                return self.send_static(*static)
+        return self.send_json({"ok": False, "error": "not found"}, 404)
 
     def do_POST(self):
         path = urlparse(self.path).path
