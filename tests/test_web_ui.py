@@ -11,6 +11,7 @@ def test_chat_ui_has_mobile_first_shell_and_composer():
     assert 'id="composer"' in HTML
     assert 'id="mobileMenu"' in HTML
     assert 'id="themeToggle"' in HTML
+    assert "--bg:#000000" in HTML
 
 
 def test_chat_ui_persists_conversations_and_renders_markdown_safely():
