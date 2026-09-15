@@ -1,2 +1,4 @@
 pytest>=8,<9
 psycopg[binary]>=3.2,<4
+google-api-python-client>=2.180,<3
+google-auth>=2.40,<3
