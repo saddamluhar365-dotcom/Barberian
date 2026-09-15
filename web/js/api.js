@@ -23,6 +23,6 @@ export const mcp = () => apiGet('/api/mcp');
 export const skills = () => apiGet('/api/skills');
 export const integrations = () => apiGet('/api/integrations');
 export const tasks = (id = null) => apiGet(id ? `/api/tasks?id=${encodeURIComponent(id)}` : '/api/tasks');
-export const events = (runId) => apiGet(`/api/events?run_id=${encodeURIComponent(runId)}`);
+export const events = (runId) => apiGet('/api/events?run_id=' + encodeURIComponent(runId));
 export const chat = (message, signal) => apiPost('/api/chat', { message }, { signal });
 export const enqueueTask = (message) => apiPost('/api/tasks', { message });
