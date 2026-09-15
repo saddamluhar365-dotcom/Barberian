@@ -9,6 +9,7 @@ from .anthropic_adapter import AnthropicAdapter
 from .capabilities import CapabilityRegistry
 from .capability_advisor import CapabilityAdvisor
 from .config import Settings
+from .generic_provider import GenericJSONAdapter
 from .http_providers import OpenAICompatibleAdapter
 from .media_adapters import ElevenLabsAdapter, ReplicateAdapter, RunwayAdapter
 from .provider_manager import ProviderManager
@@ -61,6 +62,8 @@ class Agent:
                 voice_id = self.manager.environment.get("ELEVENLABS_VOICE_ID")
                 if voice_id:
                     self.adapters[spec.name] = ElevenLabsAdapter(secret, voice_id, spec.endpoint)
+            elif kind == "generic":
+                self.adapters[spec.name] = GenericJSONAdapter(secret, spec.endpoint, name=spec.name, capability=spec.capability, timeout=self.settings.request_timeout_seconds)
 
     def check_providers(self) -> list[dict[str, Any]]:
         self.refresh_providers()
@@ -71,14 +74,10 @@ class Agent:
                 results.append({"name": spec.name, "status": ProviderStatus.UNKNOWN.value, "healthy": False, "message": "adapter unavailable"})
                 continue
             try:
-                if spec.capability == "llm":
-                    probe = {"input": "Reply with OK.", "max_tokens": 1}
-                elif spec.capability == "search":
-                    probe = {"query": "OpenAI"}
-                elif spec.capability == "audio":
-                    probe = {"text": "OK"}
-                else:
-                    probe = {"prompt": "test"}
+                if spec.capability == "llm": probe = {"input": "Reply with OK.", "max_tokens": 1}
+                elif spec.capability == "search": probe = {"query": "OpenAI"}
+                elif spec.capability == "audio": probe = {"text": "OK"}
+                else: probe = {"prompt": "test"}
                 response, latency = adapter.timed(adapter.execute, probe)
                 valid = response is not None
                 self.providers.set_health(spec.name, healthy=valid, latency_ms=latency, status=ProviderStatus.ACTIVE if valid else ProviderStatus.DEGRADED)
