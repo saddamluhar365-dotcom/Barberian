@@ -11,6 +11,8 @@ class Settings:
     port: int = 10000
     database_url: str | None = None
     google_drive_folder: str = "AI AGENT"
+    google_drive_root_folder_id: str | None = None
+    github_token: str | None = None
     routing_policy: str = "balanced"
     max_workers: int = 4
     request_timeout_seconds: float = 60.0
@@ -23,6 +25,8 @@ class Settings:
             port=int(os.getenv("PORT", "10000")),
             database_url=os.getenv("DATABASE_URL"),
             google_drive_folder=os.getenv("GOOGLE_DRIVE_FOLDER", "AI AGENT"),
+            google_drive_root_folder_id=os.getenv("GOOGLE_DRIVE_ROOT_FOLDER_ID"),
+            github_token=os.getenv("GITHUB_TOKEN"),
             routing_policy=os.getenv("ROUTING_POLICY", "balanced"),
             max_workers=max(1, int(os.getenv("MAX_WORKERS", "4"))),
             request_timeout_seconds=max(1.0, float(os.getenv("REQUEST_TIMEOUT_SECONDS", "60"))),
@@ -37,4 +41,6 @@ class Settings:
             "max_workers": self.max_workers,
             "request_timeout_seconds": self.request_timeout_seconds,
             "database_configured": bool(self.database_url),
+            "github_configured": bool(self.github_token),
+            "drive_configured": bool(self.google_drive_root_folder_id),
         }
