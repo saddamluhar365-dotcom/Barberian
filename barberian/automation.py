@@ -1,7 +1,8 @@
-"""Automation definitions and safe scheduling boundary."""
+"""Automation definitions and lightweight scheduling primitives."""
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
+import re
 
 
 @dataclass(slots=True, frozen=True)
@@ -23,4 +24,15 @@ class AutomationScheduler:
 
     def next_run(self, automation: Automation, now: datetime) -> datetime:
         self.validate(automation)
-        raise NotImplementedError("connect a durable scheduler backend")
+        schedule = automation.schedule.strip().lower()
+        if schedule in {"hourly", "every hour"}:
+            return now + timedelta(hours=1)
+        if schedule in {"daily", "every day"}:
+            return now + timedelta(days=1)
+        match = re.fullmatch(r"every\s+(\d+)\s*(m|min|minutes|h|hr|hours|d|day|days)", schedule)
+        if match:
+            amount, unit = int(match.group(1)), match.group(2)
+            if unit.startswith("m"): return now + timedelta(minutes=amount)
+            if unit.startswith("h"): return now + timedelta(hours=amount)
+            return now + timedelta(days=amount)
+        raise ValueError("unsupported schedule; use hourly, daily, or 'every Nh/Nm/Nd'")
