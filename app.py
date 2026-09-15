@@ -1,18 +1,25 @@
-"""Barberian HTTP entry point."""
+"""Barberian HTTP entry point and JSON API."""
 
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from barberian.agent import _default_agent, handle_message
+from barberian.capabilities import CapabilityRegistry
 from barberian.config import Settings
+from barberian.mcp import MCPRegistry
+from barberian.skills import SkillRegistry
+from barberian.registry import list_items
 
 WEB = Path(__file__).parent / "web" / "index.html"
+CAPABILITIES = CapabilityRegistry()
+MCP = MCPRegistry()
+SKILLS = SkillRegistry()
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "Barberian/0.2"
+    server_version = "Barberian/0.3"
 
     def log_message(self, format, *args):
         return
@@ -27,13 +34,23 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
-        path = urlparse(self.path).path
+        parsed = urlparse(self.path)
+        path = parsed.path
         if path == "/api/health":
             return self.send_json({"ok": True, "service": "barberian", "status": "healthy"})
         if path == "/api/status":
             return self.send_json(_default_agent.status())
         if path == "/api/providers":
-            return self.send_json({"ok": True, "items": _default_agent.refresh_providers()})
+            query = parse_qs(parsed.query)
+            return self.send_json({"ok": True, "items": _default_agent.refresh_providers(), "check_requested": query.get("check", ["0"])[0] == "1"})
+        if path == "/api/capabilities":
+            return self.send_json({"ok": True, "items": [item.name for item in CAPABILITIES.list()]})
+        if path == "/api/mcp":
+            return self.send_json({"ok": True, "items": MCP.list_servers()})
+        if path == "/api/skills":
+            return self.send_json({"ok": True, "items": [skill.name for skill in SKILLS.list()]})
+        if path == "/api/integrations":
+            return self.send_json({"ok": True, "mcp": list_items("mcp"), "skills": list_items("skill")})
         if path in ("/", "/index.html"):
             body = WEB.read_bytes()
             self.send_response(200)
@@ -56,11 +73,12 @@ class Handler(BaseHTTPRequestHandler):
             message = data.get("message", "")
             if not isinstance(message, str) or not message.strip():
                 return self.send_json({"ok": False, "error": "message is required"}, 400)
-            self.send_json(handle_message(message))
+            result = handle_message(message)
+            self.send_json(result, 200 if result.get("ok") else 400)
         except (ValueError, json.JSONDecodeError):
             self.send_json({"ok": False, "error": "invalid request"}, 400)
-        except Exception as exc:
-            self.send_json({"ok": False, "error": "internal error", "detail": str(exc)}, 500)
+        except Exception:
+            self.send_json({"ok": False, "error": "internal error"}, 500)
 
 
 def run(host: str | None = None, port: int | None = None):
