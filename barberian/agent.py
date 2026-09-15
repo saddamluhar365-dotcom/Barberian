@@ -11,6 +11,7 @@ from .config import Settings
 from .http_providers import OpenAICompatibleAdapter
 from .provider_manager import ProviderManager
 from .providers import ProviderRegistry, ProviderStatus
+from .research import ResearchEngine, ResearchSource
 from .routing import SmartRouter
 from .search_adapters import SerperAdapter, TavilyAdapter
 from .services import ProviderExecutor
@@ -90,6 +91,30 @@ class Agent:
                     data = message_obj["content"]
         return {"ok": True, "type": "execution", "data": data, "provider": result.provider, "model": result.model, "latency_ms": result.latency_ms, "attempts": result.attempts, "errors": result.errors}
 
+    def research(self, question: str) -> dict[str, Any]:
+        self.refresh_providers()
+        route = self.router.select("search", policy=self.settings.routing_policy, limit=3)
+        adapters = [self.adapters[item.name] for item in ([route.primary] if route.primary else []) + route.fallbacks if item.name in self.adapters]
+        if not adapters:
+            return {"ok": False, "type": "research", "error": "no search provider configured", "capability_gap": "search"}
+
+        def search(query: str):
+            sources: list[ResearchSource] = []
+            for adapter in adapters:
+                try:
+                    response = adapter.execute({"query": query})
+                    data = response.data if hasattr(response, "data") else response
+                    items = data.get("results", []) if isinstance(data, dict) else []
+                    for item in items:
+                        if isinstance(item, dict) and item.get("url"):
+                            sources.append(ResearchSource(str(item["url"]), str(item.get("title", "")), str(item.get("content", item.get("snippet", ""))), float(item.get("score", 0.0) or 0.0)))
+                except Exception:
+                    continue
+            return sources
+
+        result = ResearchEngine(search=search).run(question)
+        return {"ok": True, "type": "research", "question": result.question, "queries": result.queries, "sources": [source.__dict__ if hasattr(source, "__dict__") else {"url": source.url, "title": source.title, "excerpt": source.excerpt, "quality": source.quality} for source in result.sources], "findings": result.findings}
+
     def capability_status(self) -> dict[str, Any]:
         configured = {spec.capability for spec in self.providers._providers.values() if spec.name in self.adapters}
         assessment = CapabilityAdvisor(self.capabilities, configured).assess([item.name for item in self.capabilities.list()])
@@ -124,7 +149,7 @@ class Agent:
         if lowered in {"status", "health", "system status"}:
             return self.status()
         if lowered.startswith("research "):
-            return {"ok": True, "type": "research", "message": "Research workflow is registered; configure a search provider to execute it."}
+            return self.research(text[9:])
         try:
             return self.execute(text)
         except RuntimeError as exc:
