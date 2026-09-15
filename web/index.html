@@ -5,11 +5,17 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Barberian</title>
 <style>
-:root{color-scheme:dark}body{margin:0;background:#000;color:#fff;font:15px system-ui;display:flex;height:100vh}main{max-width:850px;width:100%;margin:auto;padding:24px}#chat{min-height:70vh;overflow:auto;border:1px solid #222;padding:16px;border-radius:14px}.msg{margin:12px 0;white-space:pre-wrap}.user{opacity:.7}form{display:flex;gap:8px;margin-top:12px}input{flex:1;background:#111;color:#fff;border:1px solid #333;border-radius:10px;padding:13px}button{background:#fff;color:#000;border:0;border-radius:10px;padding:0 18px}
-</style></head>
-<body><main><h2>Barberian</h2><div id="chat"></div><form><input id="input" placeholder="Tell Barberian what to do..." autocomplete="off"><button>Send</button></form></main>
+*{box-sizing:border-box}body{margin:0;background:#000;color:#fff;font:14px system-ui,sans-serif;height:100vh;display:flex}aside{width:230px;border-right:1px solid #202020;padding:16px;flex:none}aside h2{margin:0 0 18px;font-size:18px}nav{display:grid;gap:4px}nav button{background:transparent;color:#aaa;border:0;text-align:left;padding:10px;border-radius:8px;cursor:pointer}nav button:hover{background:#171717;color:#fff}main{max-width:920px;width:100%;margin:auto;padding:20px;display:flex;flex-direction:column;height:100vh}header{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #202020;padding-bottom:12px}#status{font-size:12px;color:#777}#chat{flex:1;overflow:auto;padding:18px 4px}.msg{max-width:80%;margin:12px 0;padding:12px 14px;border-radius:12px;white-space:pre-wrap;line-height:1.5}.user{margin-left:auto;background:#171717}.bot{border:1px solid #222}form{display:flex;gap:8px;padding-top:10px}input{flex:1;background:#111;color:#fff;border:1px solid #333;border-radius:12px;padding:14px;outline:none}button.send{background:#fff;color:#000;border:0;border-radius:12px;padding:0 20px;font-weight:600}.empty{color:#555;text-align:center;margin-top:25vh}@media(max-width:700px){aside{display:none}main{padding:12px}.msg{max-width:92%}}
+</style>
+</head>
+<body>
+<aside><h2>Barberian</h2><nav><button>＋ New Chat</button><button>Chats</button><button>Projects</button><button>Files</button><button>Tasks</button><button>MCP</button><button>Skills</button><button>APIs</button><button>Models</button><button>Tools</button><button>Research</button><button>Media</button><button>Code</button><button>GitHub</button><button>Sandbox</button><button>Logs</button><button>Usage</button><button>Security</button><button>Settings</button></nav></aside>
+<main><header><strong>New Chat</strong><span id="status">checking…</span></header><div id="chat"><div class="empty">Ask Barberian to research, plan, code, create, automate, or execute a task.</div></div><form><input id="input" placeholder="Tell Barberian what to do…" autocomplete="off"><button class="send">Send</button></form></main>
 <script>
-const chat=document.querySelector('#chat'), input=document.querySelector('#input');
-function add(who,text){const d=document.createElement('div');d.className='msg '+who;d.textContent=who==='user'?'You: '+text:'Barberian: '+text;chat.append(d);chat.scrollTop=chat.scrollHeight}
-document.querySelector('form').onsubmit=async e=>{e.preventDefault();const message=input.value.trim();if(!message)return;input.value='';add('user',message);const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message})});add('bot',JSON.stringify(await r.json(),null,2))};
-</script></body></html>
+const chat=document.querySelector('#chat'),input=document.querySelector('#input'),status=document.querySelector('#status');
+function add(who,text){const empty=chat.querySelector('.empty');if(empty)empty.remove();const d=document.createElement('div');d.className='msg '+who;d.textContent=who==='user'?'You: '+text:'Barberian: '+text;chat.append(d);chat.scrollTop=chat.scrollHeight}
+async function health(){try{const r=await fetch('/api/health');const j=await r.json();status.textContent=j.status||'online'}catch{status.textContent='offline'}}
+health();setInterval(health,30000);
+document.querySelector('form').onsubmit=async e=>{e.preventDefault();const message=input.value.trim();if(!message)return;input.value='';add('user',message);try{const r=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message})});const j=await r.json();add('bot',j.message||JSON.stringify(j,null,2))}catch(err){add('bot','Request failed: '+err.message)}};
+</script>
+</body></html>
