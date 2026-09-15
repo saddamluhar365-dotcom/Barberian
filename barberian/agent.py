@@ -9,6 +9,7 @@ from .capabilities import CapabilityRegistry
 from .capability_advisor import CapabilityAdvisor
 from .config import Settings
 from .http_providers import OpenAICompatibleAdapter
+from .media_adapters import ElevenLabsAdapter, ReplicateAdapter, RunwayAdapter
 from .provider_manager import ProviderManager
 from .providers import ProviderRegistry, ProviderStatus
 from .research import ResearchEngine, ResearchSource
@@ -42,13 +43,21 @@ class Agent:
             secret = self.manager.environment.get(key) if key else None
             if not secret or not spec.endpoint:
                 continue
-            adapter_kind = self.manager.adapter_kind(spec.name)
-            if adapter_kind == "http" and spec.model:
+            kind = self.manager.adapter_kind(spec.name)
+            if kind == "http" and spec.model:
                 self.adapters[spec.name] = OpenAICompatibleAdapter(secret, spec.endpoint, spec.model, name=spec.name, timeout=self.settings.request_timeout_seconds)
-            elif adapter_kind == "tavily":
+            elif kind == "tavily":
                 self.adapters[spec.name] = TavilyAdapter(secret, spec.endpoint)
-            elif adapter_kind == "serper":
+            elif kind == "serper":
                 self.adapters[spec.name] = SerperAdapter(secret, spec.endpoint)
+            elif kind == "replicate" and spec.model:
+                self.adapters[spec.name] = ReplicateAdapter(secret, spec.model, spec.endpoint)
+            elif kind == "runway" and spec.model:
+                self.adapters[spec.name] = RunwayAdapter(secret, spec.model, f"{spec.endpoint.rstrip('/')}/image_to_video")
+            elif kind == "elevenlabs":
+                voice_id = self.manager.environment.get("ELEVENLABS_VOICE_ID")
+                if voice_id:
+                    self.adapters[spec.name] = ElevenLabsAdapter(secret, voice_id, spec.endpoint)
 
     def check_providers(self) -> list[dict[str, Any]]:
         self.refresh_providers()
@@ -59,7 +68,7 @@ class Agent:
                 results.append({"name": spec.name, "status": ProviderStatus.UNKNOWN.value, "healthy": False, "message": "adapter unavailable"})
                 continue
             try:
-                probe = {"input": "Reply with OK.", "max_tokens": 1} if spec.capability == "llm" else {"query": "OpenAI"}
+                probe = {"input": "Reply with OK.", "max_tokens": 1} if spec.capability == "llm" else {"query": "OpenAI"} if spec.capability == "search" else {"prompt": "test", "text": "test"}
                 response, latency = adapter.timed(adapter.execute, probe)
                 valid = response is not None
                 self.providers.set_health(spec.name, healthy=valid, latency_ms=latency, status=ProviderStatus.ACTIVE if valid else ProviderStatus.DEGRADED)
@@ -97,7 +106,6 @@ class Agent:
         adapters = [self.adapters[item.name] for item in ([route.primary] if route.primary else []) + route.fallbacks if item.name in self.adapters]
         if not adapters:
             return {"ok": False, "type": "research", "error": "no search provider configured", "capability_gap": "search"}
-
         def search(query: str):
             sources: list[ResearchSource] = []
             for adapter in adapters:
@@ -111,9 +119,8 @@ class Agent:
                 except Exception:
                     continue
             return sources
-
         result = ResearchEngine(search=search).run(question)
-        return {"ok": True, "type": "research", "question": result.question, "queries": result.queries, "sources": [source.__dict__ if hasattr(source, "__dict__") else {"url": source.url, "title": source.title, "excerpt": source.excerpt, "quality": source.quality} for source in result.sources], "findings": result.findings}
+        return {"ok": True, "type": "research", "question": result.question, "queries": result.queries, "sources": [{"url": s.url, "title": s.title, "excerpt": s.excerpt, "quality": s.quality} for s in result.sources], "findings": result.findings}
 
     def capability_status(self) -> dict[str, Any]:
         configured = {spec.capability for spec in self.providers._providers.values() if spec.name in self.adapters}
