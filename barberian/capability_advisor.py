@@ -6,6 +6,17 @@ from .capabilities import CapabilityRegistry
 from .provider_catalog import CATALOG
 
 
+RECOMMENDATIONS = {
+    "llm": ("openrouter", "groq", "mistral"),
+    "search": ("tavily", "serper", "perplexity"),
+    "image": ("replicate",),
+    "video": ("runway",),
+    "audio": ("elevenlabs",),
+    "code": ("openrouter", "groq"),
+    "research": ("tavily", "perplexity"),
+}
+
+
 @dataclass(slots=True, frozen=True)
 class CapabilityAssessment:
     requested: tuple[str, ...]
@@ -16,17 +27,19 @@ class CapabilityAssessment:
 
 
 class CapabilityAdvisor:
-    def __init__(self, registry: CapabilityRegistry | None = None) -> None:
+    def __init__(self, registry: CapabilityRegistry | None = None, configured: set[str] | None = None) -> None:
         self.registry = registry or CapabilityRegistry()
+        self.configured = configured or set()
 
     def assess(self, capabilities: list[str] | tuple[str, ...]) -> CapabilityAssessment:
         requested = tuple(dict.fromkeys(item.strip().lower() for item in capabilities if item.strip()))
         known = {item.name for item in self.registry.list()}
-        available = tuple(item for item in requested if item in known)
+        available = tuple(item for item in requested if item in known and item in self.configured)
         unknown = tuple(item for item in requested if item not in known)
-        catalog_caps: dict[str, list[str]] = {}
-        for entry in CATALOG.values():
-            catalog_caps.setdefault(entry.capability, []).append(entry.name)
-        missing = tuple(item for item in available if not any(e.capability == item for e in CATALOG.values()))
-        suggestions = {item: tuple(sorted(catalog_caps.get(item, ()))) for item in requested if catalog_caps.get(item)}
+        missing = tuple(item for item in requested if item in known and item not in self.configured)
+        suggestions = {
+            item: tuple(provider for provider in RECOMMENDATIONS.get(item, ()) if provider in CATALOG)
+            for item in missing
+            if RECOMMENDATIONS.get(item)
+        }
         return CapabilityAssessment(requested, available, missing, unknown, suggestions)
