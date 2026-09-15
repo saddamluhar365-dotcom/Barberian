@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: barberian-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
+      - key: PORT
+        value: 10000
+  - type: worker
+    name: barberian-worker
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m barberian.worker
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
